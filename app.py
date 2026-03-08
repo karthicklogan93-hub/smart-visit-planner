@@ -53,7 +53,7 @@ for i in range(int(num_clients)):
     })
 
 
-# WEATHER FUNCTION (FIXED)
+# WEATHER FUNCTION
 def get_weather(lat, lon):
 
     try:
@@ -75,20 +75,19 @@ def get_weather(lat, lon):
 
         code = data["current_weather"]["weathercode"]
 
-        # Weather code interpretation
         if code == 0:
             return "Clear"
 
-        elif code in [1, 2, 3]:
+        elif code in [1,2,3]:
             return "Cloudy"
 
-        elif code in [45, 48]:
+        elif code in [45,48]:
             return "Fog"
 
-        elif code in [51, 53, 55, 61, 63, 65]:
+        elif code in [51,53,55,61,63,65]:
             return "Rain"
 
-        elif code in [71, 73, 75]:
+        elif code in [71,73,75]:
             return "Snow"
 
         else:
@@ -130,26 +129,17 @@ if st.button("Generate Visit Plan"):
         if client["lat"] is None:
             continue
 
-        location = (client["lat"], client["lon"])
-
-        distance = geodesic(start_location, location).km
-
-        traffic, traffic_factor = estimate_traffic(distance)
-
         weather = get_weather(client["lat"], client["lon"])
 
         time_value = convert_time(client["availability"])
 
         results.append({
-
             "Client": client["name"],
             "Availability": client["availability"],
             "TimeValue": time_value,
-            "Distance_km": round(distance,2),
-            "Traffic": traffic,
-            "TrafficFactor": traffic_factor,
+            "Lat": client["lat"],
+            "Lon": client["lon"],
             "Weather": weather
-
         })
 
     df = pd.DataFrame(results)
@@ -168,7 +158,40 @@ if st.button("Generate Visit Plan"):
         "Fog":5
     })
 
-    # Sorting Logic
+    # First sort by availability + weather
+    df = df.sort_values(
+        by=[
+            "TimeValue",
+            "WeatherPriority"
+        ]
+    ).reset_index(drop=True)
+
+    # Sequential Distance Calculation
+    distances = []
+    traffics = []
+    traffic_factors = []
+
+    previous_location = start_location
+
+    for i,row in df.iterrows():
+
+        current_location = (row["Lat"], row["Lon"])
+
+        distance = geodesic(previous_location, current_location).km
+
+        traffic, traffic_factor = estimate_traffic(distance)
+
+        distances.append(round(distance,2))
+        traffics.append(traffic)
+        traffic_factors.append(traffic_factor)
+
+        previous_location = current_location
+
+    df["Distance_km"] = distances
+    df["Traffic"] = traffics
+    df["TrafficFactor"] = traffic_factors
+
+    # Final sorting
     df = df.sort_values(
         by=[
             "TimeValue",
@@ -176,14 +199,14 @@ if st.button("Generate Visit Plan"):
             "TrafficFactor",
             "WeatherPriority"
         ]
-    )
+    ).reset_index(drop=True)
 
     st.header("Recommended Visit Order")
 
     for i,row in df.iterrows():
 
         st.write(
-            f"{df.index.get_loc(i)+1}. {row['Client']} | "
+            f"{i+1}. {row['Client']} | "
             f"{row['Availability']} | "
             f"{row['Distance_km']} km | "
             f"Traffic: {row['Traffic']} | "
