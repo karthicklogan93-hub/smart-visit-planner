@@ -1,181 +1,146 @@
 import streamlit as st
 import pandas as pd
-import requests
 from geopy.distance import geodesic
-import folium
-from streamlit_folium import st_folium
-from datetime import datetime
+import requests
+import itertools
 
-st.set_page_config(page_title="Smart Visit Planner", layout="wide")
+st.title("🚗 Smart Client Visit Planner")
 
-st.title("AI Smart Client Visit Planner")
+st.write("Enter client details below")
 
-st.sidebar.header("Starting Location")
+# Doctor / user starting location
+st.header("Your Starting Location")
+start_lat = st.number_input("Start Latitude", value=13.0827)
+start_lon = st.number_input("Start Longitude", value=80.2707)
 
-start_lat = st.sidebar.number_input("Start Latitude", value=11.0168)
-start_lon = st.sidebar.number_input("Start Longitude", value=76.9558)
+start_location = (start_lat, start_lon)
 
-API_KEY = "YOUR_OPENWEATHER_API_KEY"
+# Number of clients
+num_clients = st.number_input("Number of Clients", min_value=1, max_value=10, value=3)
 
-st.subheader("Enter Client Details")
+clients = []
 
-client_text = st.text_area(
-"Format: Client,Latitude,Longitude,Availability",
-"""Udumalpet Client,10.5880,77.2470,09:00-11:00
-Tiruppur Client,11.1085,77.3411,11:30-13:30
-Coimbatore Client,11.0168,76.9558,14:00-16:00"""
-)
+st.header("Client Details")
 
-# WEATHER FUNCTION
+for i in range(int(num_clients)):
+    st.subheader(f"Client {i+1}")
+    
+    name = st.text_input(f"Client Name {i+1}")
+    
+    coord = st.text_input(
+        f"Latitude,Longitude {i+1}",
+        placeholder="Example: 13.0827,80.2707"
+    )
+
+    availability = st.selectbox(
+        f"Availability {i+1}",
+        ["AM", "PM"],
+        key=i
+    )
+
+    if coord:
+        try:
+            lat, lon = map(float, coord.split(","))
+        except:
+            lat, lon = None, None
+    else:
+        lat, lon = None, None
+
+    clients.append({
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "availability": availability
+    })
+
+
+# Weather API (free)
 def get_weather(lat, lon):
-
     try:
-        url=f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
-        res=requests.get(url).json()
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        response = requests.get(url)
+        data = response.json()
+        weather_code = data["current_weather"]["weathercode"]
 
-        weather=res["weather"][0]["main"]
-        temp=res["main"]["temp"]
-
-        return weather,temp
-
+        if weather_code < 3:
+            return "Good"
+        else:
+            return "Bad"
     except:
-        return "Unknown",0
+        return "Unknown"
 
 
-# TRAFFIC ESTIMATION
+# Traffic estimation (simple logic)
 def estimate_traffic(distance):
 
-    if distance < 10:
-        factor = 1.2
-    elif distance < 50:
-        factor = 1.4
+    if distance < 5:
+        return "Low", 1
+
+    elif distance < 15:
+        return "Medium", 1.2
+
     else:
-        factor = 1.6
-
-    travel_time = distance * factor
-
-    return round(travel_time,2)
+        return "High", 1.5
 
 
-# WEATHER SCORE
-def weather_score(weather):
-
-    if weather == "Clear":
-        return 1
-    elif weather == "Clouds":
-        return 2
-    elif weather == "Rain":
-        return 4
-    else:
-        return 3
-
-
-# AVAILABILITY PRIORITY
-def availability_priority(time_range):
-
-    start_time=time_range.split("-")[0]
-
-    t=datetime.strptime(start_time,"%H:%M")
-
-    return t.hour
-
-
-# PARSE INPUT
-def parse_clients(text):
-
-    clients=[]
-
-    lines=text.split("\n")
-
-    for line in lines:
-
-        parts=line.split(",")
-
-        clients.append({
-            "Client":parts[0],
-            "Latitude":float(parts[1]),
-            "Longitude":float(parts[2]),
-            "Availability":parts[3]
-        })
-
-    return pd.DataFrame(clients)
-
-
+# Optimization
 if st.button("Generate Smart Visit Plan"):
 
-    df=parse_clients(client_text)
+    valid_clients = [c for c in clients if c["lat"] is not None]
 
-    start=(start_lat,start_lon)
+    if len(valid_clients) == 0:
+        st.warning("Please enter valid client coordinates")
+        st.stop()
 
-    results=[]
+    results = []
+
+    for client in valid_clients:
+
+        loc = (client["lat"], client["lon"])
+
+        distance = geodesic(start_location, loc).km
+
+        traffic, multiplier = estimate_traffic(distance)
+
+        weather = get_weather(client["lat"], client["lon"])
+
+        results.append({
+            "name": client["name"],
+            "availability": client["availability"],
+            "distance": distance,
+            "traffic": traffic,
+            "traffic_factor": multiplier,
+            "weather": weather,
+            "lat": client["lat"],
+            "lon": client["lon"]
+        })
+
+    df = pd.DataFrame(results)
+
+    # Convert priority to numeric
+    df["availability_priority"] = df["availability"].map({"AM":0,"PM":1})
+    df["weather_priority"] = df["weather"].map({"Good":0,"Bad":1,"Unknown":2})
+
+    # Smart sorting
+    df = df.sort_values(
+        by=[
+            "availability_priority",
+            "distance",
+            "traffic_factor",
+            "weather_priority"
+        ]
+    )
+
+    st.header("📍 Recommended Visit Order")
 
     for i,row in df.iterrows():
 
-        client_location=(row["Latitude"],row["Longitude"])
+        st.write(
+            f"{df.index.get_loc(i)+1}. {row['name']} | "
+            f"{row['availability']} | "
+            f"{round(row['distance'],2)} km | "
+            f"Traffic: {row['traffic']} | "
+            f"Weather: {row['weather']}"
+        )
 
-        distance=geodesic(start,client_location).km
-
-        weather,temp=get_weather(row["Latitude"],row["Longitude"])
-
-        traffic=estimate_traffic(distance)
-
-        availability_score=availability_priority(row["Availability"])
-
-        weather_penalty=weather_score(weather)
-
-        # PRIORITY FORMULA
-        score=(availability_score*5)+(distance*1)+(traffic*1)+(weather_penalty*3)
-
-        results.append({
-            "Client":row["Client"],
-            "Latitude":row["Latitude"],
-            "Longitude":row["Longitude"],
-            "Availability":row["Availability"],
-            "Distance_km":round(distance,2),
-            "Traffic_Est":traffic,
-            "Weather":weather,
-            "Temperature":temp,
-            "Score":score
-        })
-
-    route_df=pd.DataFrame(results)
-
-    route_df=route_df.sort_values("Score")
-
-    st.subheader("Optimized Visit Order")
-
-    st.dataframe(route_df[[
-        "Client",
-        "Availability",
-        "Distance_km",
-        "Traffic_Est",
-        "Weather",
-        "Temperature"
-    ]])
-
-    st.subheader("Route Map")
-
-    m=folium.Map(location=[start_lat,start_lon],zoom_start=9)
-
-    folium.Marker(
-        [start_lat,start_lon],
-        tooltip="Start Location",
-        icon=folium.Icon(color="green")
-    ).add_to(m)
-
-    coords=[[start_lat,start_lon]]
-
-    for i,row in route_df.iterrows():
-
-        folium.Marker(
-            [row["Latitude"],row["Longitude"]],
-            tooltip=f"{row['Client']}",
-            popup=f"Weather: {row['Weather']}",
-            icon=folium.Icon(color="blue")
-        ).add_to(m)
-
-        coords.append([row["Latitude"],row["Longitude"]])
-
-    folium.PolyLine(coords,color="red",weight=3).add_to(m)
-
-    st_folium(m,width=900,height=500)
+    st.dataframe(df)
