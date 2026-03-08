@@ -4,10 +4,10 @@ import requests
 from geopy.distance import geodesic
 from datetime import datetime
 
-st.title("🌍 AI Smart Client Visit Planner")
+st.title("🌍 Smart Client Visit Planner")
 
 st.write("Enter client details in the format:")
-st.code("ClientName, Latitude, Longitude, AvailabilityStart-End")
+st.code("ClientName, Latitude, Longitude, AvailabilityStart-End in format (10:00-12:00)")
 
 start_lat = st.number_input("Start Latitude", value=13.0827)
 start_lon = st.number_input("Start Longitude", value=80.2707)
