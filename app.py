@@ -143,4 +143,113 @@ if st.button("Generate Smart Visit Plan"):
             f"Weather: {row['weather']}"
         )
 
+    st.dataframe(df)        ["AM", "PM"],
+        key=i
+    )
+
+    if coord:
+        try:
+            lat, lon = map(float, coord.split(","))
+        except:
+            lat, lon = None, None
+    else:
+        lat, lon = None, None
+
+    clients.append({
+        "name": name,
+        "lat": lat,
+        "lon": lon,
+        "availability": availability
+    })
+
+
+# Weather API (free)
+def get_weather(lat, lon):
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        response = requests.get(url)
+        data = response.json()
+        weather_code = data["current_weather"]["weathercode"]
+
+        if weather_code < 3:
+            return "Good"
+        else:
+            return "Bad"
+    except:
+        return "Unknown"
+
+
+# Traffic estimation (simple logic)
+def estimate_traffic(distance):
+
+    if distance < 5:
+        return "Low", 1
+
+    elif distance < 15:
+        return "Medium", 1.2
+
+    else:
+        return "High", 1.5
+
+
+# Optimization
+if st.button("Generate Smart Visit Plan"):
+
+    valid_clients = [c for c in clients if c["lat"] is not None]
+
+    if len(valid_clients) == 0:
+        st.warning("Please enter valid client coordinates")
+        st.stop()
+
+    results = []
+
+    for client in valid_clients:
+
+        loc = (client["lat"], client["lon"])
+
+        distance = geodesic(start_location, loc).km
+
+        traffic, multiplier = estimate_traffic(distance)
+
+        weather = get_weather(client["lat"], client["lon"])
+
+        results.append({
+            "name": client["name"],
+            "availability": client["availability"],
+            "distance": distance,
+            "traffic": traffic,
+            "traffic_factor": multiplier,
+            "weather": weather,
+            "lat": client["lat"],
+            "lon": client["lon"]
+        })
+
+    df = pd.DataFrame(results)
+
+    # Convert priority to numeric
+    df["availability_priority"] = df["availability"].map({"AM":0,"PM":1})
+    df["weather_priority"] = df["weather"].map({"Good":0,"Bad":1,"Unknown":2})
+
+    # Smart sorting
+    df = df.sort_values(
+        by=[
+            "availability_priority",
+            "distance",
+            "traffic_factor",
+            "weather_priority"
+        ]
+    )
+
+    st.header("📍 Recommended Visit Order")
+
+    for i,row in df.iterrows():
+
+        st.write(
+            f"{df.index.get_loc(i)+1}. {row['name']} | "
+            f"{row['availability']} | "
+            f"{round(row['distance'],2)} km | "
+            f"Traffic: {row['traffic']} | "
+            f"Weather: {row['weather']}"
+        )
+
     st.dataframe(df)
