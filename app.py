@@ -1,15 +1,12 @@
 import streamlit as st
 import pandas as pd
 import requests
-from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
 from datetime import datetime, timedelta
 
 st.title("🚗 Smart Visit Planner")
 
-geolocator = Nominatim(user_agent="visit_planner")
-
-# Weather API (free)
+# Weather API
 WEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"
 
 # Store clients
@@ -18,163 +15,184 @@ if "clients" not in st.session_state:
 
 # Start location
 st.header("Start Location")
-start_address = st.text_input("Enter Start Address")
+
+start_lat = st.number_input("Start Latitude", format="%.6f")
+start_lon = st.number_input("Start Longitude", format="%.6f")
 
 # Client input
 st.header("Add Client")
 
 name = st.text_input("Client Name")
-address = st.text_input("Client Address")
+
+lat = st.number_input("Client Latitude", format="%.6f", key="lat")
+lon = st.number_input("Client Longitude", format="%.6f", key="lon")
+
 availability_start = st.time_input("Available From")
 availability_end = st.time_input("Available Until")
 
 if st.button("Add Client"):
+
     st.session_state.clients.append({
         "name": name,
-        "address": address,
+        "lat": lat,
+        "lon": lon,
         "start": availability_start,
         "end": availability_end
     })
 
 # Display clients
 if st.session_state.clients:
+
     st.subheader("Client List")
+
     df = pd.DataFrame(st.session_state.clients)
+
     st.table(df)
 
-# Get coordinates
-def get_coordinates(address):
-    location = geolocator.geocode(address)
-    if location:
-        return (location.latitude, location.longitude)
-    return None
-
-# Get weather
+# Weather function
 def get_weather(lat, lon):
+
     url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}"
+
     response = requests.get(url).json()
 
     if "weather" in response:
+
         return response["weather"][0]["main"]
+
     return "Unknown"
 
 # Travel time estimate
 def estimate_travel_time(distance_km):
-    avg_speed = 40  # km/h city average
+
+    avg_speed = 40
+
     return distance_km / avg_speed
+
 
 # Route optimization
 def optimize_route(start_coord, clients):
 
     remaining = clients.copy()
+
     route = []
+
     current = start_coord
+
     current_time = datetime.now()
 
     while remaining:
 
         best_client = None
+
         best_score = 999999
 
         for client in remaining:
 
             distance = geodesic(current, client["coord"]).km
+
             travel_time = estimate_travel_time(distance)
 
             arrival_time = current_time + timedelta(hours=travel_time)
 
-            # Availability check
             start_window = datetime.combine(datetime.today(), client["start"])
+
             end_window = datetime.combine(datetime.today(), client["end"])
 
             if arrival_time < start_window:
+
                 wait_penalty = (start_window - arrival_time).seconds / 3600
+
             else:
+
                 wait_penalty = 0
 
             if arrival_time > end_window:
+
                 availability_penalty = 100
+
             else:
+
                 availability_penalty = 0
 
-            # Weather penalty
             weather_penalty = 5 if client["weather"] in ["Rain", "Storm"] else 0
 
             score = distance + wait_penalty + availability_penalty + weather_penalty
 
             if score < best_score:
+
                 best_score = score
+
                 best_client = client
 
         route.append(best_client)
 
         travel_distance = geodesic(current, best_client["coord"]).km
+
         travel_time = estimate_travel_time(travel_distance)
 
         current_time += timedelta(hours=travel_time)
+
         current = best_client["coord"]
 
         remaining.remove(best_client)
 
     return route
 
+
 # Optimize route
 if st.button("Optimize Visit Plan"):
 
-    if not start_address:
-        st.error("Enter start location")
+    start_coord = (start_lat, start_lon)
 
-    else:
+    client_data = []
 
-        start_coord = get_coordinates(start_address)
+    for c in st.session_state.clients:
 
-        client_data = []
+        coord = (c["lat"], c["lon"])
 
-        for c in st.session_state.clients:
+        weather = get_weather(coord[0], coord[1])
 
-            coord = get_coordinates(c["address"])
+        client_data.append({
+            "name": c["name"],
+            "coord": coord,
+            "start": c["start"],
+            "end": c["end"],
+            "weather": weather
+        })
 
-            if coord:
+    route = optimize_route(start_coord, client_data)
 
-                weather = get_weather(coord[0], coord[1])
+    st.header("📍 Suggested Visit Order")
 
-                client_data.append({
-                    "name": c["name"],
-                    "address": c["address"],
-                    "start": c["start"],
-                    "end": c["end"],
-                    "coord": coord,
-                    "weather": weather
-                })
+    current = start_coord
 
-        route = optimize_route(start_coord, client_data)
+    total_distance = 0
 
-        st.header("📍 Suggested Visit Order")
+    results = []
 
-        current = start_coord
-        total_distance = 0
-        results = []
+    for i, client in enumerate(route, 1):
 
-        for i, client in enumerate(route, 1):
+        distance = geodesic(current, client["coord"]).km
 
-            distance = geodesic(current, client["coord"]).km
-            total_distance += distance
+        total_distance += distance
 
-            travel_time = estimate_travel_time(distance)
+        travel_time = estimate_travel_time(distance)
 
-            results.append({
-                "Order": i,
-                "Client": client["name"],
-                "Address": client["address"],
-                "Distance (km)": round(distance,2),
-                "Travel Time (hrs)": round(travel_time,2),
-                "Weather": client["weather"]
-            })
+        results.append({
+            "Order": i,
+            "Client": client["name"],
+            "Latitude": client["coord"][0],
+            "Longitude": client["coord"][1],
+            "Distance (km)": round(distance,2),
+            "Travel Time (hrs)": round(travel_time,2),
+            "Weather": client["weather"]
+        })
 
-            current = client["coord"]
+        current = client["coord"]
 
-        result_df = pd.DataFrame(results)
+    result_df = pd.DataFrame(results)
 
-        st.table(result_df)
+    st.table(result_df)
 
-        st.success(f"Total Distance: {round(total_distance,2)} km")
+    st.success(f"Total Distance: {round(total_distance,2)} km")
