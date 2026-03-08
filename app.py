@@ -19,7 +19,7 @@ ClientB,13.0352,80.2223,13:00-15:00
 ClientC,13.1200,80.2950,09:00-11:00"""
 )
 
-API_KEY = "379f93629be3e64392ecacf7d1f08ed3"
+API_KEY = "968fe0ce80c15dc1ba42bc3cdf544746"
 
 def get_weather(lat,lon):
 
