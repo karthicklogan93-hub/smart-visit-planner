@@ -2,197 +2,108 @@ import streamlit as st
 import pandas as pd
 import requests
 from geopy.distance import geodesic
-from datetime import datetime, timedelta
+from datetime import datetime
 
-st.title("🚗 Smart Visit Planner")
+st.title("🌍 AI Smart Client Visit Planner")
 
-# Weather API
-WEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"
+st.write("Enter client details in the format:")
+st.code("ClientName, Latitude, Longitude, AvailabilityStart-End")
 
-# Store clients
-if "clients" not in st.session_state:
-    st.session_state.clients = []
+start_lat = st.number_input("Start Latitude", value=13.0827)
+start_lon = st.number_input("Start Longitude", value=80.2707)
 
-# Start location
-st.header("Start Location")
+client_input = st.text_area(
+"Enter Clients",
+"""ClientA,13.0674,80.2376,10:00-12:00
+ClientB,13.0352,80.2223,13:00-15:00
+ClientC,13.1200,80.2950,09:00-11:00"""
+)
 
-start_lat = st.number_input("Start Latitude", format="%.6f")
-start_lon = st.number_input("Start Longitude", format="%.6f")
+API_KEY = "YOUR_OPENWEATHER_API_KEY"
 
-# Client input
-st.header("Add Client")
+def get_weather(lat,lon):
 
-name = st.text_input("Client Name")
+    url=f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_KEY}&units=metric"
 
-lat = st.number_input("Client Latitude", format="%.6f", key="lat")
-lon = st.number_input("Client Longitude", format="%.6f", key="lon")
+    try:
+        res=requests.get(url).json()
+        weather=res["weather"][0]["main"]
+        temp=res["main"]["temp"]
+        return f"{weather} {temp}°C"
+    except:
+        return "Unavailable"
 
-availability_start = st.time_input("Available From")
-availability_end = st.time_input("Available Until")
+def parse_clients(text):
 
-if st.button("Add Client"):
+    clients=[]
+    lines=text.strip().split("\n")
 
-    st.session_state.clients.append({
-        "name": name,
-        "lat": lat,
-        "lon": lon,
-        "start": availability_start,
-        "end": availability_end
-    })
+    for line in lines:
 
-# Display clients
-if st.session_state.clients:
+        parts=line.split(",")
 
-    st.subheader("Client List")
+        name=parts[0]
+        lat=float(parts[1])
+        lon=float(parts[2])
+        availability=parts[3]
 
-    df = pd.DataFrame(st.session_state.clients)
+        clients.append({
+            "name":name,
+            "lat":lat,
+            "lon":lon,
+            "availability":availability
+        })
 
-    st.table(df)
-
-# Weather function
-def get_weather(lat, lon):
-
-    url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}"
-
-    response = requests.get(url).json()
-
-    if "weather" in response:
-
-        return response["weather"][0]["main"]
-
-    return "Unknown"
-
-# Travel time estimate
-def estimate_travel_time(distance_km):
-
-    avg_speed = 40
-
-    return distance_km / avg_speed
+    return clients
 
 
-# Route optimization
-def optimize_route(start_coord, clients):
+def optimize_route(start,clients):
 
-    remaining = clients.copy()
-
-    route = []
-
-    current = start_coord
-
-    current_time = datetime.now()
+    route=[]
+    remaining=clients.copy()
+    current=start
 
     while remaining:
 
-        best_client = None
+        nearest=min(
+            remaining,
+            key=lambda x: geodesic(current,(x["lat"],x["lon"])).km
+        )
 
-        best_score = 999999
+        dist=geodesic(current,(nearest["lat"],nearest["lon"])).km
 
-        for client in remaining:
+        weather=get_weather(nearest["lat"],nearest["lon"])
 
-            distance = geodesic(current, client["coord"]).km
+        route.append({
+            "Client":nearest["name"],
+            "Latitude":nearest["lat"],
+            "Longitude":nearest["lon"],
+            "Availability":nearest["availability"],
+            "Weather":weather,
+            "Distance_km":round(dist,2)
+        })
 
-            travel_time = estimate_travel_time(distance)
-
-            arrival_time = current_time + timedelta(hours=travel_time)
-
-            start_window = datetime.combine(datetime.today(), client["start"])
-
-            end_window = datetime.combine(datetime.today(), client["end"])
-
-            if arrival_time < start_window:
-
-                wait_penalty = (start_window - arrival_time).seconds / 3600
-
-            else:
-
-                wait_penalty = 0
-
-            if arrival_time > end_window:
-
-                availability_penalty = 100
-
-            else:
-
-                availability_penalty = 0
-
-            weather_penalty = 5 if client["weather"] in ["Rain", "Storm"] else 0
-
-            score = distance + wait_penalty + availability_penalty + weather_penalty
-
-            if score < best_score:
-
-                best_score = score
-
-                best_client = client
-
-        route.append(best_client)
-
-        travel_distance = geodesic(current, best_client["coord"]).km
-
-        travel_time = estimate_travel_time(travel_distance)
-
-        current_time += timedelta(hours=travel_time)
-
-        current = best_client["coord"]
-
-        remaining.remove(best_client)
+        current=(nearest["lat"],nearest["lon"])
+        remaining.remove(nearest)
 
     return route
 
 
-# Optimize route
-if st.button("Optimize Visit Plan"):
+if st.button("Generate Smart Visit Plan"):
 
-    start_coord = (start_lat, start_lon)
+    clients=parse_clients(client_input)
 
-    client_data = []
+    start=(start_lat,start_lon)
 
-    for c in st.session_state.clients:
+    route=optimize_route(start,clients)
 
-        coord = (c["lat"], c["lon"])
+    df=pd.DataFrame(route)
 
-        weather = get_weather(coord[0], coord[1])
+    st.success("Recommended Visit Order")
 
-        client_data.append({
-            "name": c["name"],
-            "coord": coord,
-            "start": c["start"],
-            "end": c["end"],
-            "weather": weather
-        })
+    st.dataframe(df)
 
-    route = optimize_route(start_coord, client_data)
+    total=df["Distance_km"].sum()
 
-    st.header("📍 Suggested Visit Order")
-
-    current = start_coord
-
-    total_distance = 0
-
-    results = []
-
-    for i, client in enumerate(route, 1):
-
-        distance = geodesic(current, client["coord"]).km
-
-        total_distance += distance
-
-        travel_time = estimate_travel_time(distance)
-
-        results.append({
-            "Order": i,
-            "Client": client["name"],
-            "Latitude": client["coord"][0],
-            "Longitude": client["coord"][1],
-            "Distance (km)": round(distance,2),
-            "Travel Time (hrs)": round(travel_time,2),
-            "Weather": client["weather"]
-        })
-
-        current = client["coord"]
-
-    result_df = pd.DataFrame(results)
-
-    st.table(result_df)
-
-    st.success(f"Total Distance: {round(total_distance,2)} km")
+    st.write("### Total Distance")
+    st.write(round(total,2),"km")
