@@ -52,27 +52,50 @@ for i in range(int(num_clients)):
         "availability": availability
     })
 
-# Weather API
+
+# WEATHER FUNCTION (FIXED)
 def get_weather(lat, lon):
 
     try:
 
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        url = "https://api.open-meteo.com/v1/forecast"
 
-        r = requests.get(url)
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current_weather": True
+        }
+
+        r = requests.get(url, params=params, timeout=10)
 
         data = r.json()
 
+        if "current_weather" not in data:
+            return "Moderate"
+
         code = data["current_weather"]["weathercode"]
 
-        if code <= 3:
-            return "Good"
+        # Weather code interpretation
+        if code == 0:
+            return "Clear"
+
+        elif code in [1, 2, 3]:
+            return "Cloudy"
+
+        elif code in [45, 48]:
+            return "Fog"
+
+        elif code in [51, 53, 55, 61, 63, 65]:
+            return "Rain"
+
+        elif code in [71, 73, 75]:
+            return "Snow"
 
         else:
-            return "Bad"
+            return "Moderate"
 
     except:
-        return "Unknown"
+        return "Moderate"
 
 
 # Traffic Estimation
@@ -137,21 +160,22 @@ if st.button("Generate Visit Plan"):
 
     # Weather priority
     df["WeatherPriority"] = df["Weather"].map({
-        "Good":0,
-        "Bad":1,
-        "Unknown":2
+        "Clear":0,
+        "Cloudy":1,
+        "Moderate":2,
+        "Rain":3,
+        "Snow":4,
+        "Fog":5
     })
 
     # Sorting Logic
     df = df.sort_values(
-
         by=[
             "TimeValue",
             "Distance_km",
             "TrafficFactor",
             "WeatherPriority"
         ]
-
     )
 
     st.header("Recommended Visit Order")
@@ -159,13 +183,11 @@ if st.button("Generate Visit Plan"):
     for i,row in df.iterrows():
 
         st.write(
-
             f"{df.index.get_loc(i)+1}. {row['Client']} | "
             f"{row['Availability']} | "
             f"{row['Distance_km']} km | "
             f"Traffic: {row['Traffic']} | "
             f"Weather: {row['Weather']}"
-
         )
 
     st.dataframe(df)
